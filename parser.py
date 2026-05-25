@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import aiohttp
+import random
 from urllib.parse import urlparse
 
 # =========================
@@ -18,20 +19,19 @@ SOURCE_SUBS = [
     "https://gitverse.ru/api/repos/flaafix/AetrisVPN/raw/branch/master/AetrisVPN.txt",
     "https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
     "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100",
-    "https://gist.githubusercontent.com/nikitavalentinov90021-ai/5c0f36a8c7e078484a4c08fab5beee72/raw/8be7c44d7b264e3bf4119b031b4c5a96d7f306ca/Premium.txt",
+    "https://gist.githubusercontent.com/nikitavalentinov90021-ai/5c0f36a8c7e078484a4c08fab5beee72/raw/Premium.txt",
     "https://raw.githubusercontent.com/ChkavHalyavaVPN/Chkav-HalyavaVPNUS-vpn-duo/refs/heads/main/vpn.txt",
-    "https://gist.githubusercontent.com/pidarasuebisov-afk/e220b44264242d1a97c0908aba091edd/raw/PKN%20cocnyL",
+    "https://gist.githubusercontent.com/pidarasuebisov-afk/e220b44264242d1a97c0908aba091edd/raw/PKN",
     "https://sub.pfvpn.cfd/free/sub"
 ]
 
 OUTPUT_FILE = "output.txt"
 
-MAX_LATENCY = 5000
-THREADS = 650
-TIMEOUT = 3
+MAX_LATENCY = 5500
+THREADS = 600
+TIMEOUT = 4
 
 REMOVE_DUPLICATES = True
-REMOVE_DEAD = True
 AUTO_RENAME = True
 SORT_BY_LATENCY = True
 
@@ -51,8 +51,11 @@ FLAGS = {
     "JP": "🇯🇵",
     "SG": "🇸🇬",
     "CA": "🇨🇦",
-    "TR": "🇹🇷"
+    "TR": "🇹🇷",
+    "PL": "🇵🇱"
 }
+
+FALLBACK_COUNTRIES = list(FLAGS.keys())
 
 # =========================
 # DOWNLOAD
@@ -66,7 +69,7 @@ async def fetch_text(session, url):
         return ""
 
 # =========================
-# BASE64
+# BASE64 FIX
 # =========================
 
 def decode_base64_if_needed(text):
@@ -90,7 +93,7 @@ def extract_configs(text):
     ]
 
 # =========================
-# VMESS PARSE
+# VMESS
 # =========================
 
 def parse_vmess(config):
@@ -121,32 +124,34 @@ def get_host_port(config):
         return None, None
 
 # =========================
-# GEO (FIXED)
+# GEO (REAL + FALLBACK)
 # =========================
 
 async def get_geo(session, ip):
-    try:
-        async with session.get(
-            f"http://ip-api.com/json/{ip}?fields=countryCode,city",
-            timeout=5
-        ) as r:
 
+    url = f"http://ip-api.com/json/{ip}?fields=status,countryCode,city"
+
+    try:
+        async with session.get(url, timeout=6) as r:
             data = await r.json()
+
+            if data.get("status") != "success":
+                country = random.choice(FALLBACK_COUNTRIES)
+                return country, "Node"
 
             country = data.get("countryCode")
             city = data.get("city")
 
-            # 🔥 FALLBACK FIX
-            if not country or country == "UN":
-                country = "NL"
+            if not country:
+                country = random.choice(FALLBACK_COUNTRIES)
 
-            if not city or city == "Unknown":
+            if not city or city in ["Unknown", "", None]:
                 city = "Node"
 
             return country, city
 
     except:
-        return "NL", "Node"
+        return random.choice(FALLBACK_COUNTRIES), "Node"
 
 # =========================
 # LATENCY
@@ -173,20 +178,23 @@ async def tcp_ping(host, port):
         return 9999
 
 # =========================
-# CLEAN NAME
+# CLEAN
 # =========================
 
 def strip_name(config):
     return config.split("#")[0] if "#" in config else config
 
 # =========================
-# RENAME
+# RENAME (CLEAN & NICE)
 # =========================
 
 def rename_config(config, index, country, city):
+
     base = strip_name(config)
     flag = FLAGS.get(country, "🏳️")
-    name = f"{index} {flag} {country} {city}"
+
+    name = f"{index} {flag} {country} | {city}"
+
     return f"{base}#{name}"
 
 # =========================
@@ -206,6 +214,7 @@ def invalid_host(host):
 # =========================
 
 async def process_config(session, semaphore, config, index):
+
     async with semaphore:
 
         host, port = get_host_port(config)
@@ -230,6 +239,7 @@ async def process_config(session, semaphore, config, index):
 # =========================
 
 async def main():
+
     semaphore = asyncio.Semaphore(THREADS)
 
     async with aiohttp.ClientSession() as session:
