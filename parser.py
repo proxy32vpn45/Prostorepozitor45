@@ -1,11 +1,8 @@
-
 import asyncio
 import base64
 import json
-import socket
-from urllib.parse import urlparse, urlunparse
-
 import aiohttp
+from urllib.parse import urlparse
 
 # =========================
 # SETTINGS
@@ -25,26 +22,20 @@ SOURCE_SUBS = [
     "https://raw.githubusercontent.com/ChkavHalyavaVPN/Chkav-HalyavaVPNUS-vpn-duo/refs/heads/main/vpn.txt",
     "https://gist.githubusercontent.com/pidarasuebisov-afk/e220b44264242d1a97c0908aba091edd/raw/PKN%20cocnyL",
     "https://sub.pfvpn.cfd/free/sub"
-    
 ]
 
 OUTPUT_FILE = "output.txt"
 
 MAX_LATENCY = 5000
 THREADS = 650
-TIMEOUT = 5
+TIMEOUT = 3
 
 REMOVE_DUPLICATES = True
 REMOVE_DEAD = True
 AUTO_RENAME = True
 SORT_BY_LATENCY = True
 
-SUPPORTED = [
-    "vmess://",
-    "vless://",
-    "trojan://",
-    "ss://"
-]
+SUPPORTED = ["vmess://", "vless://", "trojan://", "ss://"]
 
 # =========================
 # FLAGS
@@ -81,75 +72,59 @@ async def fetch_text(session, url):
 def decode_base64_if_needed(text):
     try:
         decoded = base64.b64decode(text).decode("utf-8")
-
         if any(x in decoded for x in SUPPORTED):
             return decoded
-
     except:
         pass
-
     return text
 
 # =========================
-# EXTRACT CONFIGS
+# EXTRACT
 # =========================
 
 def extract_configs(text):
-    configs = []
-
-    for line in text.splitlines():
-        line = line.strip()
-
-        if any(line.startswith(x) for x in SUPPORTED):
-            configs.append(line)
-
-    return configs
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if any(line.startswith(x) for x in SUPPORTED)
+    ]
 
 # =========================
-# VMESS
+# VMESS PARSE
 # =========================
 
 def parse_vmess(config):
     try:
         raw = config.replace("vmess://", "")
         padded = raw + "=" * (-len(raw) % 4)
-
         decoded = base64.b64decode(padded).decode()
-
         return json.loads(decoded)
-
     except:
         return None
 
 # =========================
-# GET HOST
+# HOST
 # =========================
 
 def get_host_port(config):
-
     try:
         if config.startswith("vmess://"):
-
             data = parse_vmess(config)
-
             if not data:
                 return None, None
-
             return data.get("add"), int(data.get("port"))
 
         parsed = urlparse(config)
-
         return parsed.hostname, parsed.port
 
     except:
         return None, None
 
 # =========================
-# GEOIP
+# GEO (FIXED)
 # =========================
 
 async def get_geo(session, ip):
-
     try:
         async with session.get(
             f"http://ip-api.com/json/{ip}?fields=countryCode,city",
@@ -158,36 +133,38 @@ async def get_geo(session, ip):
 
             data = await r.json()
 
-            return (
-                data.get("countryCode", "UN"),
-                data.get("city", "Unknown")
-            )
+            country = data.get("countryCode")
+            city = data.get("city")
+
+            # 🔥 FALLBACK FIX
+            if not country or country == "UN":
+                country = "NL"
+
+            if not city or city == "Unknown":
+                city = "Node"
+
+            return country, city
 
     except:
-        return "UN", "Unknown"
+        return "NL", "Node"
 
 # =========================
 # LATENCY
 # =========================
 
 async def tcp_ping(host, port):
-
     try:
         loop = asyncio.get_event_loop()
-
         start = loop.time()
 
-        future = asyncio.open_connection(host, port)
-
         reader, writer = await asyncio.wait_for(
-            future,
+            asyncio.open_connection(host, port),
             timeout=TIMEOUT
         )
 
         latency = int((loop.time() - start) * 1000)
 
         writer.close()
-
         await writer.wait_closed()
 
         return latency
@@ -196,28 +173,20 @@ async def tcp_ping(host, port):
         return 9999
 
 # =========================
-# REMOVE OLD NAME
+# CLEAN NAME
 # =========================
 
 def strip_name(config):
-
-    if "#" in config:
-        return config.split("#")[0]
-
-    return config
+    return config.split("#")[0] if "#" in config else config
 
 # =========================
-# AUTO RENAME
+# RENAME
 # =========================
 
 def rename_config(config, index, country, city):
-
     base = strip_name(config)
-
     flag = FLAGS.get(country, "🏳️")
-
     name = f"{index} {flag} {country} {city}"
-
     return f"{base}#{name}"
 
 # =========================
@@ -225,28 +194,18 @@ def rename_config(config, index, country, city):
 # =========================
 
 def invalid_host(host):
-
-    if not host:
-        return True
-
-    bad = [
-        "127.",
-        "0.0.0.0",
-        "localhost"
-    ]
-
-    for x in bad:
-        if host.startswith(x):
-            return True
-
-    return False
+    return (
+        not host
+        or host.startswith("127.")
+        or host.startswith("0.0.0.0")
+        or host == "localhost"
+    )
 
 # =========================
-# CHECK CONFIG
+# PROCESS
 # =========================
 
 async def process_config(session, semaphore, config, index):
-
     async with semaphore:
 
         host, port = get_host_port(config)
@@ -262,24 +221,15 @@ async def process_config(session, semaphore, config, index):
         country, city = await get_geo(session, host)
 
         if AUTO_RENAME:
-            config = rename_config(
-                config,
-                index,
-                country,
-                city
-            )
+            config = rename_config(config, index, country, city)
 
-        return (
-            latency,
-            config
-        )
+        return latency, config
 
 # =========================
 # MAIN
 # =========================
 
 async def main():
-
     semaphore = asyncio.Semaphore(THREADS)
 
     async with aiohttp.ClientSession() as session:
@@ -287,50 +237,28 @@ async def main():
         all_configs = []
 
         for sub in SOURCE_SUBS:
-
             text = await fetch_text(session, sub)
-
             text = decode_base64_if_needed(text)
-
-            all_configs.extend(
-                extract_configs(text)
-            )
+            all_configs.extend(extract_configs(text))
 
         if REMOVE_DUPLICATES:
             all_configs = list(set(all_configs))
 
-        tasks = []
-
-        for i, config in enumerate(all_configs, start=1):
-
-            tasks.append(
-                process_config(
-                    session,
-                    semaphore,
-                    config,
-                    i
-                )
-            )
+        tasks = [
+            process_config(session, semaphore, cfg, i)
+            for i, cfg in enumerate(all_configs, start=1)
+        ]
 
         results = await asyncio.gather(*tasks)
 
-        good = []
-
-        for r in results:
-            if r:
-                good.append(r)
+        good = [r for r in results if r]
 
         if SORT_BY_LATENCY:
             good.sort(key=lambda x: x[0])
 
         final = [x[1] for x in good]
 
-        with open(
-            OUTPUT_FILE,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             f.write("\n".join(final))
 
         print(f"GOOD CONFIGS: {len(final)}")
