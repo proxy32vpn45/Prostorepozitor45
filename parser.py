@@ -224,8 +224,7 @@ async def process_config(session, semaphore, config, index):
 
         latency = await tcp_ping(host, port)
 
-        if latency > MAX_LATENCY:
-            return None
+        # ❗ НЕ ВЫКИДЫВАЕМ ПО ПИНГУ
 
         country, city = await get_geo(session, host)
 
