@@ -1,19 +1,20 @@
-
-name: VPN Parser
+name: Update parser output
 
 on:
+  push:
   workflow_dispatch:
-
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */1 * * *"
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  update:
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -21,21 +22,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install
+      - name: Install dependencies
         run: |
-          pip install aiohttp
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run parser
         run: |
-          python parser.py
+          python main.py
 
-      - name: Commit
+      - name: Configure git
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Commit changes
+        run: |
           git add output.txt
+          git diff --cached --quiet && echo "No changes" || git commit -m "update configs"
 
-          git commit -m "update configs" || echo "no changes"
-
-          git push
+      - name: Push changes
+        run: |
+          git push origin HEAD
