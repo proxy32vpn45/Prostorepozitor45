@@ -1,4 +1,4 @@
-name: Update parser output
+name: parser
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
 
       - name: Run parser
         run: |
-          python main.py
+          python parser.py
 
       - name: Configure git
         run: |
