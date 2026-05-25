@@ -44,11 +44,11 @@ MODES = {
     },
     "balanced": {
         "max_latency": 2500,
-        "keep_dead": true
+        "keep_dead": True
     },
     "relaxed": {
         "max_latency": 8000,
-        "keep_dead": false
+        "keep_dead": False
     }
 }
 
