@@ -12,15 +12,27 @@ import aiohttp
 # =========================
 
 SOURCE_SUBS = [
-    "YOUR_SUB_1",
-    "YOUR_SUB_2"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
+    "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass-unsecure/bypass-unsecure-all.txt",
+    "https://raw.githubusercontent.com/Temnuk/naabuzil/refs/heads/main/whitelist_full",
+    "https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt",
+    "https://cvedcsub.vercel.app/configs/configs.txt",
+    "https://gist.githubusercontent.com/flaafix/c79a81037d15163360571c7a7331b153/raw/AetrisVPN.txt",
+    "https://gitverse.ru/api/repos/flaafix/AetrisVPN/raw/branch/master/AetrisVPN.txt",
+    "https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
+    "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100",
+    "https://gist.githubusercontent.com/nikitavalentinov90021-ai/5c0f36a8c7e078484a4c08fab5beee72/raw/8be7c44d7b264e3bf4119b031b4c5a96d7f306ca/Premium.txt",
+    "https://raw.githubusercontent.com/ChkavHalyavaVPN/Chkav-HalyavaVPNUS-vpn-duo/refs/heads/main/vpn.txt",
+    "https://gist.githubusercontent.com/pidarasuebisov-afk/e220b44264242d1a97c0908aba091edd/raw/PKN%20cocnyL",
+    "https://sub.pfvpn.cfd/free/sub"
+    
 ]
 
 OUTPUT_FILE = "output.txt"
 
-MAX_LATENCY = 350
-THREADS = 300
-TIMEOUT = 4
+MAX_LATENCY = 5000
+THREADS = 650
+TIMEOUT = 5
 
 REMOVE_DUPLICATES = True
 REMOVE_DEAD = True
