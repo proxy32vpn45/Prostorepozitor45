@@ -6,7 +6,7 @@ import random
 from urllib.parse import urlparse
 
 # =========================
-# SETTINGS
+# SOURCES
 # =========================
 
 SOURCE_SUBS = [
@@ -15,27 +15,45 @@ SOURCE_SUBS = [
     "https://raw.githubusercontent.com/Temnuk/naabuzil/refs/heads/main/whitelist_full",
     "https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt",
     "https://cvedcsub.vercel.app/configs/configs.txt",
-    "https://gist.githubusercontent.com/flaafix/c79a81037d15163360571c7a7331b153/raw/AetrisVPN.txt",
+    "https://gist.githubusercontent.com/flaafix/raw/AetrisVPN.txt",
     "https://gitverse.ru/api/repos/flaafix/AetrisVPN/raw/branch/master/AetrisVPN.txt",
     "https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
     "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100",
-    "https://gist.githubusercontent.com/nikitavalentinov90021-ai/5c0f36a8c7e078484a4c08fab5beee72/raw/Premium.txt",
-    "https://raw.githubusercontent.com/ChkavHalyavaVPN/Chkav-HalyavaVPNUS-vpn-duo/refs/heads/main/vpn.txt",
-    "https://gist.githubusercontent.com/pidarasuebisov-afk/e220b44264242d1a97c0908aba091edd/raw/PKN",
+    "https://gist.githubusercontent.com/nikitavalentinov90021-ai/raw/Premium.txt",
     "https://sub.pfvpn.cfd/free/sub"
 ]
 
 OUTPUT_FILE = "output.txt"
 
-MAX_LATENCY = 3500
-THREADS = 600
+THREADS = 250
 TIMEOUT = 3
 
 REMOVE_DUPLICATES = True
 AUTO_RENAME = True
-SORT_BY_LATENCY = True
 
 SUPPORTED = ["vmess://", "vless://", "trojan://", "ss://"]
+
+# =========================
+# MODES (NEW SYSTEM)
+# =========================
+
+MODES = {
+    "strict": {
+        "max_latency": 800,
+        "keep_dead": False
+    },
+    "balanced": {
+        "max_latency": 2500,
+        "keep_dead": true
+    },
+    "relaxed": {
+        "max_latency": 8000,
+        "keep_dead": false
+    }
+}
+
+MODE = "balanced"
+mode = MODES[MODE]
 
 # =========================
 # FLAGS
@@ -55,13 +73,35 @@ FLAGS = {
     "PL": "🇵🇱"
 }
 
-FALLBACK_COUNTRIES = list(FLAGS.keys())
+FALLBACK = list(FLAGS.keys())
 
 # =========================
-# DOWNLOAD
+# SCORE SYSTEM
 # =========================
 
-async def fetch_text(session, url):
+def score(latency, proto):
+
+    if latency == 9999:
+        return 0
+
+    base = 1200 - latency
+
+    if proto.startswith("vless://"):
+        base += 60
+    elif proto.startswith("vmess://"):
+        base += 40
+    elif proto.startswith("trojan://"):
+        base += 30
+    else:
+        base += 10
+
+    return max(base, 1)
+
+# =========================
+# FETCH
+# =========================
+
+async def fetch(session, url):
     try:
         async with session.get(url, timeout=20) as r:
             return await r.text()
@@ -69,14 +109,14 @@ async def fetch_text(session, url):
         return ""
 
 # =========================
-# BASE64 FIX
+# BASE64
 # =========================
 
-def decode_base64_if_needed(text):
+def decode(text):
     try:
-        decoded = base64.b64decode(text).decode("utf-8")
-        if any(x in decoded for x in SUPPORTED):
-            return decoded
+        d = base64.b64decode(text).decode()
+        if any(x in d for x in SUPPORTED):
+            return d
     except:
         pass
     return text
@@ -85,153 +125,118 @@ def decode_base64_if_needed(text):
 # EXTRACT
 # =========================
 
-def extract_configs(text):
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if any(line.startswith(x) for x in SUPPORTED)
-    ]
+def extract(text):
+    return [x.strip() for x in text.splitlines() if any(x.startswith(s) for s in SUPPORTED)]
 
 # =========================
-# VMESS
+# HOST PARSER
 # =========================
 
-def parse_vmess(config):
+def get_host(cfg):
+
     try:
-        raw = config.replace("vmess://", "")
-        padded = raw + "=" * (-len(raw) % 4)
-        decoded = base64.b64decode(padded).decode()
-        return json.loads(decoded)
-    except:
-        return None
-
-# =========================
-# HOST
-# =========================
-
-def get_host_port(config):
-    try:
-        if config.startswith("vmess://"):
-            data = parse_vmess(config)
-            if not data:
-                return None, None
+        if cfg.startswith("vmess://"):
+            raw = cfg.replace("vmess://", "")
+            raw += "=" * (-len(raw) % 4)
+            data = json.loads(base64.b64decode(raw).decode())
             return data.get("add"), int(data.get("port"))
 
-        parsed = urlparse(config)
-        return parsed.hostname, parsed.port
+        u = urlparse(cfg)
+        return u.hostname, u.port
 
     except:
         return None, None
 
 # =========================
-# GEO (REAL + FALLBACK)
+# PING
 # =========================
 
-async def get_geo(session, ip):
+async def ping(host, port):
 
-    url = f"http://ip-api.com/json/{ip}?fields=status,countryCode,city"
-
-    try:
-        async with session.get(url, timeout=6) as r:
-            data = await r.json()
-
-            if data.get("status") != "success":
-                country = random.choice(FALLBACK_COUNTRIES)
-                return country, "Node"
-
-            country = data.get("countryCode")
-            city = data.get("city")
-
-            if not country:
-                country = random.choice(FALLBACK_COUNTRIES)
-
-            if not city or city in ["Unknown", "", None]:
-                city = "Node"
-
-            return country, city
-
-    except:
-        return random.choice(FALLBACK_COUNTRIES), "Node"
-
-# =========================
-# LATENCY
-# =========================
-
-async def tcp_ping(host, port):
     try:
         loop = asyncio.get_event_loop()
         start = loop.time()
 
-        reader, writer = await asyncio.wait_for(
+        r, w = await asyncio.wait_for(
             asyncio.open_connection(host, port),
             timeout=TIMEOUT
         )
 
-        latency = int((loop.time() - start) * 1000)
+        ms = int((loop.time() - start) * 1000)
 
-        writer.close()
-        await writer.wait_closed()
+        w.close()
+        await w.wait_closed()
 
-        return latency
+        return ms
 
     except:
         return 9999
 
 # =========================
-# CLEAN
+# GEO (FALLBACK SAFE)
 # =========================
 
-def strip_name(config):
-    return config.split("#")[0] if "#" in config else config
+async def geo(session, ip):
+
+    try:
+        async with session.get(
+            f"http://ip-api.com/json/{ip}?fields=status,countryCode,city",
+            timeout=5
+        ) as r:
+
+            d = await r.json()
+
+            if d.get("status") != "success":
+                return random.choice(FALLBACK), "Node"
+
+            c = d.get("countryCode") or random.choice(FALLBACK)
+            city = d.get("city") or "Node"
+
+            return c, city
+
+    except:
+        return random.choice(FALLBACK), "Node"
 
 # =========================
-# RENAME (CLEAN & NICE)
+# NAME
 # =========================
 
-def rename_config(config, index, country, city):
+def rename(cfg, i, c, city):
 
-    base = strip_name(config)
-    flag = FLAGS.get(country, "🏳️")
+    base = cfg.split("#")[0]
+    flag = FLAGS.get(c, "🏳️")
 
-    name = f"{index} {flag} {country} | {city}"
-
-    return f"{base}#{name}"
-
-# =========================
-# VALIDATION
-# =========================
-
-def invalid_host(host):
-    return (
-        not host
-        or host.startswith("127.")
-        or host.startswith("0.0.0.0")
-        or host == "localhost"
-    )
+    return f"{base}#{i} {flag} {c} | {city}"
 
 # =========================
 # PROCESS
 # =========================
 
-async def process_config(session, semaphore, config, index):
+async def process(session, sem, cfg, i):
 
-    async with semaphore:
+    async with sem:
 
-        host, port = get_host_port(config)
-
-        if invalid_host(host):
+        host, port = get_host(cfg)
+        if not host:
             return None
 
-        latency = await tcp_ping(host, port)
+        ms = await ping(host, port)
 
-        # ❗ НЕ ВЫКИДЫВАЕМ ПО ПИНГУ
+        # MODE FILTER
+        if ms > mode["max_latency"]:
+            if not mode["keep_dead"]:
+                return None
 
-        country, city = await get_geo(session, host)
+        s = score(ms, cfg)
+        if s <= 1 and not mode["keep_dead"]:
+            return None
+
+        c, city = await geo(session, host)
 
         if AUTO_RENAME:
-            config = rename_config(config, index, country, city)
+            cfg = rename(cfg, i, c, city)
 
-        return latency, config
+        return s, ms, cfg
 
 # =========================
 # MAIN
@@ -239,38 +244,39 @@ async def process_config(session, semaphore, config, index):
 
 async def main():
 
-    semaphore = asyncio.Semaphore(THREADS)
+    sem = asyncio.Semaphore(THREADS)
 
     async with aiohttp.ClientSession() as session:
 
-        all_configs = []
+        all_cfg = []
 
-        for sub in SOURCE_SUBS:
-            text = await fetch_text(session, sub)
-            text = decode_base64_if_needed(text)
-            all_configs.extend(extract_configs(text))
+        for url in SOURCE_SUBS:
+            text = await fetch(session, url)
+            text = decode(text)
+            all_cfg.extend(extract(text))
 
         if REMOVE_DUPLICATES:
-            all_configs = list(set(all_configs))
+            all_cfg = list(set(all_cfg))
 
         tasks = [
-            process_config(session, semaphore, cfg, i)
-            for i, cfg in enumerate(all_configs, start=1)
+            process(session, sem, c, i)
+            for i, c in enumerate(all_cfg, 1)
         ]
 
-        results = await asyncio.gather(*tasks)
+        res = await asyncio.gather(*tasks)
 
-        good = [r for r in results if r]
+        good = [r for r in res if r]
 
-        if SORT_BY_LATENCY:
-            good.sort(key=lambda x: x[0])
+        # BEST FIRST
+        good.sort(key=lambda x: (-x[0], x[1]))
 
-        final = [x[1] for x in good]
+        final = [x[2] for x in good]
 
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             f.write("\n".join(final))
 
-        print(f"GOOD CONFIGS: {len(final)}")
+        print("MODE:", MODE)
+        print("GOOD:", len(final))
 
 # =========================
 # RUN
