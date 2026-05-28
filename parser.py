@@ -20,7 +20,13 @@ SOURCE_SUBS = [
     "https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
     "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100",
     "https://gist.githubusercontent.com/nikitavalentinov90021-ai/raw/Premium.txt",
-    "https://sub.pfvpn.cfd/free/sub"
+    "https://sub.pfvpn.cfd/free/sub",
+    "https://etoneya.best/whitelist",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+    "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_SS-all_RUS.txt"
 ]
 
 OUTPUT_FILE = "output.txt"
