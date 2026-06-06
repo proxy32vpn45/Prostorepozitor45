@@ -49,8 +49,8 @@ SUPPORTED = ["vmess://", "vless://", "trojan://", "ss://"]
 # MODES
 # =========================
 MODES = {
-    "strict": {"max_latency": 800, "keep_dead": True},
-    "balanced": {"max_latency": 2500, "keep_dead": False},
+    "strict": {"max_latency": 800, "keep_dead": False},
+    "balanced": {"max_latency": 2500, "keep_dead": True},
     "relaxed": {"max_latency": 8000, "keep_dead": False},
 }
 MODE = "balanced"
