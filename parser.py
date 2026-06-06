@@ -4,11 +4,12 @@ import json
 import aiohttp
 import random
 from urllib.parse import urlparse
+import ssl
+import statistics
 
 # =========================
 # SOURCES
 # =========================
-
 SOURCE_SUBS = [
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
     "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass-unsecure/bypass-unsecure-all.txt",
@@ -38,83 +39,55 @@ SOURCE_SUBS = [
 ]
 
 OUTPUT_FILE = "output.txt"
-
-THREADS = 300
-TIMEOUT = 1
-
+THREADS = 200
+TIMEOUT = 5
 REMOVE_DUPLICATES = True
 AUTO_RENAME = True
-
 SUPPORTED = ["vmess://", "vless://", "trojan://", "ss://"]
 
 # =========================
-# MODES (NEW SYSTEM)
+# MODES
 # =========================
-
 MODES = {
-    "strict": {
-        "max_latency": 800,
-        "keep_dead": True
-    },
-    "balanced": {
-        "max_latency": 2500,
-        "keep_dead": False
-    },
-    "relaxed": {
-        "max_latency": 8000,
-        "keep_dead": False
-    }
+    "strict": {"max_latency": 800, "keep_dead": True},
+    "balanced": {"max_latency": 2500, "keep_dead": False},
+    "relaxed": {"max_latency": 8000, "keep_dead": False},
 }
-
 MODE = "balanced"
 mode = MODES[MODE]
 
 # =========================
 # FLAGS
 # =========================
-
 FLAGS = {
-    "NL": "🇳🇱",
-    "DE": "🇩🇪",
-    "US": "🇺🇸",
-    "FR": "🇫🇷",
-    "GB": "🇬🇧",
-    "RU": "🇷🇺",
-    "JP": "🇯🇵",
-    "SG": "🇸🇬",
-    "CA": "🇨🇦",
-    "TR": "🇹🇷",
-    "PL": "🇵🇱"
+    "NL": "🇳🇱", "DE": "🇩🇪", "US": "🇺🇸", "FR": "🇫🇷",
+    "GB": "🇬🇧", "RU": "🇷🇺", "JP": "🇯🇵", "SG": "🇸🇬",
+    "CA": "🇨🇦", "TR": "🇹🇷", "PL": "🇵🇱"
 }
-
 FALLBACK = list(FLAGS.keys())
 
 # =========================
 # SCORE SYSTEM
 # =========================
-
-def score(latency, proto):
-
+def score(latency, proto, tls_ok):
     if latency == 9999:
         return 0
-
-    base = 1200 - latency
-
+    s = max(0, 3000 - latency)
+    if tls_ok:
+        s += 1000
     if proto.startswith("vless://"):
-        base += 60
-    elif proto.startswith("vmess://"):
-        base += 40
+        s += 500
     elif proto.startswith("trojan://"):
-        base += 30
+        s += 400
+    elif proto.startswith("vmess://"):
+        s += 300
     else:
-        base += 10
-
-    return max(base, 1)
+        s += 100
+    return s
 
 # =========================
 # FETCH
 # =========================
-
 async def fetch(session, url):
     try:
         async with session.get(url, timeout=20) as r:
@@ -125,10 +98,9 @@ async def fetch(session, url):
 # =========================
 # BASE64
 # =========================
-
 def decode(text):
     try:
-        d = base64.b64decode(text).decode()
+        d = base64.b64decode(text + "=" * (-len(text) % 4)).decode()
         if any(x in d for x in SUPPORTED):
             return d
     except:
@@ -138,152 +110,152 @@ def decode(text):
 # =========================
 # EXTRACT
 # =========================
-
 def extract(text):
     return [x.strip() for x in text.splitlines() if any(x.startswith(s) for s in SUPPORTED)]
 
 # =========================
 # HOST PARSER
 # =========================
-
 def get_host(cfg):
-
     try:
         if cfg.startswith("vmess://"):
             raw = cfg.replace("vmess://", "")
             raw += "=" * (-len(raw) % 4)
             data = json.loads(base64.b64decode(raw).decode())
             return data.get("add"), int(data.get("port"))
-
         u = urlparse(cfg)
         return u.hostname, u.port
-
     except:
         return None, None
 
 # =========================
-# PING
+# MODERN PING
 # =========================
-
-async def ping(host, port):
-
-    try:
-        loop = asyncio.get_event_loop()
-        start = loop.time()
-
-        r, w = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=TIMEOUT
-        )
-
-        ms = int((loop.time() - start) * 1000)
-
-        w.close()
-        await w.wait_closed()
-
-        return ms
-
-    except:
+async def ping(host, port, attempts=2):
+    latencies = []
+    for _ in range(attempts):
+        try:
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=TIMEOUT
+            )
+            ms = int((loop.time() - start) * 1000)
+            writer.close()
+            await writer.wait_closed()
+            latencies.append(ms)
+        except:
+            pass
+    if len(latencies) < 1:
         return 9999
+    return int(statistics.mean(latencies))
 
 # =========================
-# GEO (FALLBACK SAFE)
+# TLS CHECK
 # =========================
-
-async def geo(session, ip):
-
+async def tls_check(host, port):
     try:
-        async with session.get(
-            f"http://ip-api.com/json/{ip}?fields=status,countryCode,city",
+        ctx = ssl.create_default_context()
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, ssl=ctx, server_hostname=host),
             timeout=5
-        ) as r:
-
-            d = await r.json()
-
-            if d.get("status") != "success":
-                return random.choice(FALLBACK), "Node"
-
-            c = d.get("countryCode") or random.choice(FALLBACK)
-            city = d.get("city") or "Node"
-
-            return c, city
-
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True
     except:
-        return random.choice(FALLBACK), "Node"
+        return False
 
 # =========================
-# NAME
+# REAL INTERNET TEST
 # =========================
+async def http_test(host, port):
+    try:
+        url = f"https://{host}:{port}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5, ssl=False) as r:
+                return r.status in [200, 400, 403]
+    except:
+        return False
 
+# =========================
+# GEO (CACHED)
+# =========================
+geo_cache = {}
+async def geo(session, ip):
+    if ip in geo_cache:
+        return geo_cache[ip]
+    try:
+        async with session.get(f"https://ipwho.is/{ip}", timeout=5) as r:
+            d = await r.json()
+            country = d.get("country_code") or random.choice(FALLBACK)
+            city = d.get("city") or "Node"
+            geo_cache[ip] = (country, city)
+            return country, city
+    except:
+        result = (random.choice(FALLBACK), "Node")
+        geo_cache[ip] = result
+        return result
+
+# =========================
+# RENAME
+# =========================
 def rename(cfg, i, c, city):
-
     base = cfg.split("#")[0]
     flag = FLAGS.get(c, "🏳️")
-
     return f"{base}#{i} {flag} {c} | {city}"
 
 # =========================
 # PROCESS
 # =========================
-
 async def process(session, sem, cfg, i):
-
     async with sem:
-
         host, port = get_host(cfg)
-        if not host:
+        if not host or not port:
             return None
 
-        ms = await ping(host, port)
-
-        # MODE FILTER
-        if ms > mode["max_latency"]:
-            if not mode["keep_dead"]:
-                return None
-
-        s = score(ms, cfg)
-        if s <= 1 and not mode["keep_dead"]:
+        latency = await ping(host, port)
+        if latency == 9999 or latency > mode["max_latency"]:
             return None
 
-        c, city = await geo(session, host)
+        tls_ok = await tls_check(host, port)
+        if not tls_ok:
+            return None
+
+        # реальная проверка интернета
+        online = await http_test(host, port)
+        if not online:
+            return None
+
+        country, city = await geo(session, host)
 
         if AUTO_RENAME:
-            cfg = rename(cfg, i, c, city)
+            cfg = rename(cfg, i, country, city)
 
-        return s, ms, cfg
+        return score(latency, cfg, tls_ok), latency, cfg
 
 # =========================
 # MAIN
 # =========================
-
 async def main():
-
     sem = asyncio.Semaphore(THREADS)
-
     async with aiohttp.ClientSession() as session:
-
         all_cfg = []
 
-        for url in SOURCE_SUBS:
-            text = await fetch(session, url)
+        texts = await asyncio.gather(*[fetch(session, url) for url in SOURCE_SUBS])
+        for text in texts:
             text = decode(text)
             all_cfg.extend(extract(text))
 
         if REMOVE_DUPLICATES:
             all_cfg = list(set(all_cfg))
 
-        tasks = [
-            process(session, sem, c, i)
-            for i, c in enumerate(all_cfg, 1)
-        ]
-
+        tasks = [process(session, sem, c, i) for i, c in enumerate(all_cfg, 1)]
         res = await asyncio.gather(*tasks)
 
         good = [r for r in res if r]
-
-        # BEST FIRST
         good.sort(key=lambda x: (-x[0], x[1]))
-
         final = [x[2] for x in good]
 
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -295,5 +267,5 @@ async def main():
 # =========================
 # RUN
 # =========================
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
